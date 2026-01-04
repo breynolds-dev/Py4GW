@@ -26,6 +26,14 @@ from Py4GWCoreLib import (GLOBAL_CACHE, Routines, Range, Py4GW, ConsoleLog, Mode
 
 
 class BotSettings:
+    """Configuration settings for the Destroyer Cores bot."""
+
+    """ MONEY SETTINGS """
+    MAX_GOLD_IN_STORAGE: int = 800000
+    """ Gold threshold to trigger buying ectos (default: 800000) """
+    MAX_GOLD_ON_CHARACTER: int = 90000
+    """ Gold threshold to trigger deposit (default: 90000) """
+
     # Map/Outpost IDs
     EYE_OF_THE_NORTH_OUTPOST_ID = 642
     CENTRAL_TRANSFER_CHAMBER_ID = 652
@@ -33,9 +41,6 @@ class BotSettings:
     
     # Dialog IDs
     GLINTS_CHALLENGE_DIALOG_ID = 0x86
-    
-    # Gold threshold for deposit
-    GOLD_THRESHOLD_DEPOSIT: int = 90000
 
     # Runs counters
     TOTAL_RUNS: int = 0
@@ -49,20 +54,24 @@ class BotSettings:
     DEBUG: bool = True
 
 
-bot = Botting("Destroyer Cores",
-              custom_build=KeiranThackerayEOTN())
-     
+bot = Botting(
+  "Destroyer Cores",
+  custom_build = KeiranThackerayEOTN()
+)
+
+
 def create_bot_routine(bot: Botting) -> None:
-    InitializeBot(bot)
-    GoToEyeOfTheNorth(bot)
-    QuestLoopEntry(bot)  # Start the quest loop
-    
+    InitializeBot(bot)               # Setup death handler and leave party
+    QuestLoopEntry(bot)              # Start the quest loop
+
+
 def QuestLoopEntry(bot: Botting) -> None:
     """Main quest loop entry point: checks gold, deposits if needed, then runs quest"""
-    CheckAndDepositGold(bot)             # Check gold and deposit if threshold exceeded
+    CheckAndDepositGold(bot)         # Check gold and deposit if threshold exceeded
     GoToCentralTransferChamber(bot)  # Exit to HOM (skiped if already in HOM)
-    EnterQuest(bot)                      # Enter the quest
-    FarmDestroyerCores(bot)              # Run the farm then loops back to CheckAndDepositGold
+    EnterQuest(bot)                  # Enter the quest
+    FarmDestroyerCores(bot)          # Run the farm then loops back to CheckAndDepositGold
+
 
 def _on_death(bot: "Botting"):
     _increment_runs_counters(bot, "fail")
@@ -75,7 +84,8 @@ def _on_death(bot: "Botting"):
     fsm.jump_to_state_by_name("[H]Enter Quest_4") 
     fsm.resume()                           
     yield  
-    
+
+
 def on_death(bot: "Botting"):
     print ("Player is dead. Run Failed, Restarting...")
     ActionQueueManager().ResetAllQueues()
@@ -87,30 +97,18 @@ def on_death(bot: "Botting"):
     bot.OverrideBuild(KeiranThackerayEOTN())
     bot.Templates.Aggressive(enable_imp=False)
  
+
 def _DisableCombat(bot: Botting) -> None:
     bot.Templates.Pacifist()
 
+
 def InitializeBot(bot: Botting) -> None:
+    bot.States.AddHeader("Initialize Bot")
+
     condition = lambda: on_death(bot)
     bot.Events.OnDeathCallback(condition)
     bot.Party.LeaveParty()
 
-def GoToEyeOfTheNorth(bot: Botting) -> None:
-    bot.States.AddHeader("Go to Eye of the North")
-
-    def _go_to_eotn(bot: Botting):
-        current_map = Map.GetMapID()
-        should_skip_travel = current_map in [BotSettings.EYE_OF_THE_NORTH_OUTPOST_ID]
-        if should_skip_travel:
-            if BotSettings.DEBUG:   
-                print(f"[DEBUG] Already in Eye of the North, skipping travel")
-            return
-
-        Map.Travel(BotSettings.EYE_OF_THE_NORTH_OUTPOST_ID)
-        yield from Routines.Yield.wait(1000)
-        yield from Routines.Yield.Map.WaitforMapLoad(BotSettings.EYE_OF_THE_NORTH_OUTPOST_ID) 
-
-    bot.States.AddCustomState(lambda: _go_to_eotn(bot), "GoToEyeOfTheNorth")
 
 def GoToCentralTransferChamber(bot: Botting) -> None:
     bot.States.AddHeader("Go to Central Transfer Chamber")
@@ -129,32 +127,21 @@ def GoToCentralTransferChamber(bot: Botting) -> None:
 
     bot.States.AddCustomState(lambda: _go_to_ctc(bot), "GoToCentralTransferChamber")
 
+
 def CheckAndDepositGold(bot: Botting) -> None:
     """Check gold on character, deposit if needed"""
     bot.States.AddHeader("Check and Deposit Gold")
 
     def _check_and_deposit_gold(bot: Botting):
-        current_map = Map.GetMapID()
         gold_on_char = GLOBAL_CACHE.Inventory.GetGoldOnCharacter()
         gold_in_storage = GLOBAL_CACHE.Inventory.GetGoldInStorage()
 
         if BotSettings.DEBUG:   
-            print(f"[DEBUG] CheckAndDepositGold: current_map={current_map}, gold={gold_on_char}, storage={gold_in_storage}")
+            print(f"[DEBUG] CheckAndDepositGold: gold={gold_on_char}, storage={gold_in_storage}")
         
-        # Travel to EOTN if character has 90k+ gold
-        if gold_on_char > BotSettings.GOLD_THRESHOLD_DEPOSIT:
-            # Ensure we're in EOTN outpost
-            if current_map != BotSettings.EYE_OF_THE_NORTH_OUTPOST_ID:
-                if BotSettings.DEBUG:   
-                    print(f"[DEBUG] Traveling to EOTN from map {current_map}")
-
-                Map.Travel(BotSettings.EYE_OF_THE_NORTH_OUTPOST_ID)
-                yield from Routines.Yield.wait(1000)
-                yield from Routines.Yield.Map.WaitforMapLoad(BotSettings.EYE_OF_THE_NORTH_OUTPOST_ID)
-                current_map = BotSettings.EYE_OF_THE_NORTH_OUTPOST_ID
-
-            # Deposit gold only if storage hasn't reached 800k
-            if gold_in_storage < 800000:
+        if gold_on_char > BotSettings.MAX_GOLD_ON_CHARACTER:
+            # Deposit all gold if storage is below settings threshold
+            if gold_in_storage < BotSettings.MAX_GOLD_IN_STORAGE:
                 if BotSettings.DEBUG:   
                     print(f"Depositing {gold_on_char} gold in bank")
                 GLOBAL_CACHE.Inventory.DepositGold(gold_on_char)
@@ -164,17 +151,16 @@ def CheckAndDepositGold(bot: Botting) -> None:
                     print(f"Storage ({gold_in_storage}) has reached gold threshold, keeping gold on character for ecto purchases")
         else:
             if BotSettings.DEBUG:   
-                print(f"Gold ({gold_on_char}) below threshold ({BotSettings.GOLD_THRESHOLD_DEPOSIT}), skipping travel and deposit")
+                print(f"Gold ({gold_on_char}) below threshold ({BotSettings.MAX_GOLD_ON_CHARACTER}), skipping travel and deposit")
         
-        # After deposit check, try to buy ectos if in EOTN outpost
-        current_map = Map.GetMapID()
-        if current_map == BotSettings.EYE_OF_THE_NORTH_OUTPOST_ID:
-            yield from BuyMaterials(bot)
-
-        if BotSettings.DEBUG:   
-            print(f"[DEBUG] After gold check: current_map={current_map}, HOM={BotSettings.CENTRAL_TRANSFER_CHAMBER_ID}")
+        # Check 
+        if gold_on_char > BotSettings.MAX_GOLD_ON_CHARACTER and gold_in_storage > BotSettings.MAX_GOLD_IN_STORAGE:
+          if BotSettings.DEBUG:   
+              print(f"[DEBUG] Attempting to buy ectos: gold_on_char={gold_on_char}, gold_in_storage={gold_in_storage}")
+          yield from BuyMaterials(bot)
 
     bot.States.AddCustomState(lambda: _check_and_deposit_gold(bot), "CheckAndDepositGold")
+
 
 def TravelToCentralTransferChamber(bot: Botting) -> None:
     bot.States.AddHeader("Travel to Central Transfer Chamber")
@@ -210,29 +196,15 @@ def TravelToCentralTransferChamber(bot: Botting) -> None:
 
     bot.States.AddCustomState(lambda: _exit_to_central_transfer_chamber(bot), "ExitToCentralTransferChamber")
 
-def deposit_gold(bot: Botting):
-    gold_on_char = GLOBAL_CACHE.Inventory.GetGoldOnCharacter()
-
-    # Deposit all gold if character has 90k or more
-    if gold_on_char >= 90000:
-        bot.Map.Travel(target_map_id=642)
-        bot.Wait.ForMapLoad(target_map_id=642)
-        yield from Routines.Yield.wait(500)
-        GLOBAL_CACHE.Inventory.DepositGold(gold_on_char)
-        yield from Routines.Yield.wait(500)
-        bot.Move.XYAndExitMap(-4873.00, 5284.00, target_map_id=646)
-        bot.Wait.ForMapLoad(target_map_id=646)
-        yield
 
 def BuyMaterials(bot: Botting):
     """Buy Glob of Ectoplasm if gold conditions are met."""
-    # Check gold conditions for buying Glob of Ectoplasm
     gold_in_inventory = GLOBAL_CACHE.Inventory.GetGoldOnCharacter()
     gold_in_storage = GLOBAL_CACHE.Inventory.GetGoldInStorage()
     
-    if gold_in_inventory >= 90000 and gold_in_storage >= 800000:
+    if gold_in_inventory >= BotSettings.MAX_GOLD_ON_CHARACTER and gold_in_storage >= BotSettings.MAX_GOLD_IN_STORAGE:
         # Move to and speak with rare material trader
-        yield from bot.Move._coro_xy_and_dialog(-2079.00, 1046.00, dialog_id=0x00000001)
+        yield from bot.Move._coro_xy_and_dialog(3168.42, 1640.82, dialog_id=0x00000001)
         
         # Buy Glob of Ectoplasm until inventory gold drops below 2k
         for _ in range(100):  # Max 100 Globs of Ectoplasm
@@ -243,20 +215,15 @@ def BuyMaterials(bot: Botting):
                 break
             yield from Routines.Yield.Merchant.BuyMaterial(ModelID.Glob_Of_Ectoplasm.value)
             BotSettings.ECTOS_BOUGHT += 1  # Increment ecto counter
-            yield from Routines.Yield.wait(100)  # Small delay between purchases
+            yield from Routines.Yield.wait(250)  # Small delay between purchases
+
 
 def EnterQuest(bot: Botting) -> None:
     bot.States.AddHeader("Enter Quest")
-
     bot.Move.XYAndDialog(2428.16, 3534.33, BotSettings.GLINTS_CHALLENGE_DIALOG_ID)
     bot.Wait.ForMapLoad(target_map_id=BotSettings.GLINTS_CHALLENGE_MAP_ID)
 
-    # def _enter_quest(bot: Botting):
-    #     yield from Routines.Yield.wait(2000)
-    #     yield from Routines.Yield.Map.WaitforMapLoad(BotSettings.GLINTS_CHALLENGE_MAP_ID)
 
-    # bot.States.AddCustomState(lambda: _enter_quest(bot), "EnterQuest")
-    
 def FarmDestroyerCores(bot: Botting) -> None:
     bot.States.AddHeader("Run Quest")
     
@@ -307,7 +274,7 @@ def FarmDestroyerCores(bot: Botting) -> None:
     bot.States.AddCustomState(lambda: _increment_success(), "IncrementSuccessCounter")
     
     # Loop back to check gold and run quest again
-    bot.States.JumpToStepName("[H]Check and Deposit Gold_3")
+    bot.States.JumpToStepName("[H]Check and Deposit Gold_2")
 
 def _increment_runs_counters(bot: Botting, type: Literal["success", "fail"]):
     """Increment run counters based on run result"""
@@ -337,14 +304,14 @@ def _draw_settings(bot: Botting):
     PyImGui.text("Bot Settings")
 
     # Gold threshold controls
-    gold_threshold = BotSettings.GOLD_THRESHOLD_DEPOSIT
+    gold_threshold = BotSettings.MAX_GOLD_ON_CHARACTER
     gold_threshold = PyImGui.input_int("Gold deposit threshold", gold_threshold)
 
     # Debug controls
     debug = BotSettings.DEBUG
     debug = PyImGui.checkbox("Debug", debug)
 
-    BotSettings.GOLD_THRESHOLD_DEPOSIT = gold_threshold
+    BotSettings.MAX_GOLD_ON_CHARACTER = gold_threshold
     BotSettings.DEBUG = debug
 
 bot.SetMainRoutine(create_bot_routine)
