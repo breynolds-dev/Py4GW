@@ -1,5 +1,6 @@
 from .ShadowFormAssassinVaettir import ShadowFormAssassinVaettir
 from .ShadowFormMesmerVaettir import ShadowFormMesmerVaettir
+from .ShadowFormRangerDestroyerCore import ShadowFormRangerDestroyerCore
 from .AutoCombat import AutoCombat
 from .KeiranThackerayEOTN import KeiranThackerayEOTN
 from .SF_Ass_vaettir import SF_Ass_vaettir
@@ -11,6 +12,7 @@ from .VOS_Derv_Barbarous import VOS_Derv_Barbarous
 __all__ = [
     "ShadowFormAssassinVaettir",
     "ShadowFormMesmerVaettir",
+    "ShadowFormRangerDestroyerCore",
     "AutoCombat",
     "KeiranThackerayEOTN",
     "SF_Ass_vaettir",

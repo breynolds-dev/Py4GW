@@ -22,7 +22,7 @@ from typing import Literal, Tuple
 
 from Py4GWCoreLib.Builds import KeiranThackerayEOTN
 from Py4GWCoreLib import (GLOBAL_CACHE, Routines, Range, Py4GW, ConsoleLog, ModelID, Botting,
-                          Map, ImGui, ActionQueueManager)
+                          Map, ImGui, ActionQueueManager, FrameInfo)
 
 
 class BotSettings:
@@ -30,12 +30,12 @@ class BotSettings:
     EYE_OF_THE_NORTH_OUTPOST_ID = 642
     CENTRAL_TRANSFER_CHAMBER_ID = 652
     GLINTS_CHALLENGE_MAP_ID = 37
-
+    
+    # Dialog IDs
+    GLINTS_CHALLENGE_DIALOG_ID = 0x86
+    
     # Gold threshold for deposit
     GOLD_THRESHOLD_DEPOSIT: int = 90000
-
-    # Properties to enable/disable via setting tab
-    WAR_SUPPLIES_ENABLED: bool = False
 
     # Runs counters
     TOTAL_RUNS: int = 0
@@ -46,34 +46,33 @@ class BotSettings:
     ECTOS_BOUGHT: int = 0
 
     # Misc
-    DEBUG: bool = False
+    DEBUG: bool = True
 
 
-bot = Botting("Auspicious Beginnings",
+bot = Botting("Destroyer Cores",
               custom_build=KeiranThackerayEOTN())
      
 def create_bot_routine(bot: Botting) -> None:
     InitializeBot(bot)
-    GoToEOTN(bot)
+    GoToEyeOfTheNorth(bot)
     QuestLoopEntry(bot)  # Start the quest loop
     
 def QuestLoopEntry(bot: Botting) -> None:
     """Main quest loop entry point: checks gold, deposits if needed, then runs quest"""
-    CheckAndDepositGold(bot)   # Check gold and deposit if threshold exceeded
-    ExitToHOM(bot)             # Exit to HOM (skiped if already in HOM)
-    bot.Map.Travel(target_map_id=BotSettings.CENTRAL_TRANSFER_CHAMBER_ID)
-    EnterQuest(bot)            # Enter the quest
-    RunQuest(bot)              # Run the quest (loops back to CheckAndDepositGold)
+    CheckAndDepositGold(bot)             # Check gold and deposit if threshold exceeded
+    GoToCentralTransferChamber(bot)  # Exit to HOM (skiped if already in HOM)
+    EnterQuest(bot)                      # Enter the quest
+    FarmDestroyerCores(bot)              # Run the farm then loops back to CheckAndDepositGold
 
 def _on_death(bot: "Botting"):
     _increment_runs_counters(bot, "fail")
     bot.Properties.ApplyNow("pause_on_danger", "active", False)
-    bot.Properties.ApplyNow("halt_on_death","active", True)
-    bot.Properties.ApplyNow("movement_timeout","value", 15000)
-    bot.Properties.ApplyNow("auto_combat","active", False)
+    bot.Properties.ApplyNow("halt_on_death", "active", True)
+    bot.Properties.ApplyNow("movement_timeout", "value", 15000)
+    bot.Properties.ApplyNow("auto_combat", "active", False)
     yield from Routines.Yield.wait(8000)
     fsm = bot.config.FSM
-    fsm.jump_to_state_by_name("[H]Prepare for Quest_5") 
+    fsm.jump_to_state_by_name("[H]Enter Quest_4") 
     fsm.resume()                           
     yield  
     
@@ -84,9 +83,9 @@ def on_death(bot: "Botting"):
     fsm.pause()
     fsm.AddManagedCoroutine("OnDeath", _on_death(bot))
 
-def _EnableCombat(bot: Botting) -> None:
-        bot.OverrideBuild(KeiranThackerayEOTN())
-        bot.Templates.Aggressive(enable_imp=False)
+    # Travel
+    bot.OverrideBuild(KeiranThackerayEOTN())
+    bot.Templates.Aggressive(enable_imp=False)
  
 def _DisableCombat(bot: Botting) -> None:
     bot.Templates.Pacifist()
@@ -94,23 +93,41 @@ def _DisableCombat(bot: Botting) -> None:
 def InitializeBot(bot: Botting) -> None:
     condition = lambda: on_death(bot)
     bot.Events.OnDeathCallback(condition)
+    bot.Party.LeaveParty()
 
-def GoToEOTN(bot: Botting) -> None:
-    bot.States.AddHeader("Go to EOTN")
+def GoToEyeOfTheNorth(bot: Botting) -> None:
+    bot.States.AddHeader("Go to Eye of the North")
 
     def _go_to_eotn(bot: Botting):
         current_map = Map.GetMapID()
-        should_skip_travel = current_map in [BotSettings.EYE_OF_THE_NORTH_OUTPOST_ID, BotSettings.CENTRAL_TRANSFER_CHAMBER_ID]
+        should_skip_travel = current_map in [BotSettings.EYE_OF_THE_NORTH_OUTPOST_ID]
         if should_skip_travel:
             if BotSettings.DEBUG:   
-                print(f"[DEBUG] Already in EOTN or CTC, skipping travel")
+                print(f"[DEBUG] Already in Eye of the North, skipping travel")
             return
 
         Map.Travel(BotSettings.EYE_OF_THE_NORTH_OUTPOST_ID)
         yield from Routines.Yield.wait(1000)
         yield from Routines.Yield.Map.WaitforMapLoad(BotSettings.EYE_OF_THE_NORTH_OUTPOST_ID) 
 
-    bot.States.AddCustomState(lambda: _go_to_eotn(bot), "GoToEOTN")
+    bot.States.AddCustomState(lambda: _go_to_eotn(bot), "GoToEyeOfTheNorth")
+
+def GoToCentralTransferChamber(bot: Botting) -> None:
+    bot.States.AddHeader("Go to Central Transfer Chamber")
+
+    def _go_to_ctc(bot: Botting):
+        current_map = Map.GetMapID()
+        should_skip_travel = current_map in [BotSettings.CENTRAL_TRANSFER_CHAMBER_ID]
+        if should_skip_travel:
+            if BotSettings.DEBUG:   
+                print(f"[DEBUG] Already in Central Transfer Chamber, skipping travel")
+            return
+
+        Map.Travel(BotSettings.CENTRAL_TRANSFER_CHAMBER_ID)
+        yield from Routines.Yield.wait(1000)
+        yield from Routines.Yield.Map.WaitforMapLoad(BotSettings.CENTRAL_TRANSFER_CHAMBER_ID) 
+
+    bot.States.AddCustomState(lambda: _go_to_ctc(bot), "GoToCentralTransferChamber")
 
 def CheckAndDepositGold(bot: Botting) -> None:
     """Check gold on character, deposit if needed"""
@@ -159,42 +176,10 @@ def CheckAndDepositGold(bot: Botting) -> None:
 
     bot.States.AddCustomState(lambda: _check_and_deposit_gold(bot), "CheckAndDepositGold")
 
-def ExitToHOM(bot: Botting) -> None:
-    bot.States.AddHeader("Exit to HOM")
-
-    # Ensure we're in HOM for quest preparation
-    def _exit_to_hom(bot: Botting):
-        current_map = Map.GetMapID()
-        should_exit_to_hom = current_map != BotSettings.CENTRAL_TRANSFER_CHAMBER_ID
-        should_travel_to_eye_of_the_north = current_map != BotSettings.EYE_OF_THE_NORTH_OUTPOST_ID
-
-        if should_exit_to_hom:
-            if BotSettings.DEBUG:   
-                print(f"[DEBUG] Not in HOM, need to go there. Currently in map {current_map}")
-
-            if should_travel_to_eye_of_the_north:
-                if BotSettings.DEBUG:   
-                    print(f"[DEBUG] Not in EOTN, traveling there first")
-                Map.Travel(BotSettings.EYE_OF_THE_NORTH_OUTPOST_ID)
-                yield from Routines.Yield.wait(1000)
-                yield from Routines.Yield.Map.WaitforMapLoad(BotSettings.EYE_OF_THE_NORTH_OUTPOST_ID)
-
-            if BotSettings.DEBUG:   
-                print(f"[DEBUG] Moving to portal coordinates and exiting to HOM")
-
-            # Use coroutine version to move to portal and exit
-            yield from bot.Move._coro_xy_and_exit_map(-4873.00, 5284.00, target_map_id=BotSettings.CENTRAL_TRANSFER_CHAMBER_ID)
-        else:
-            if BotSettings.DEBUG:   
-                print(f"[DEBUG] Already in HOM, skipping travel")
-        yield
-
-    bot.States.AddCustomState(lambda: _exit_to_hom(bot), "ExitToHOM")
-
 def TravelToCentralTransferChamber(bot: Botting) -> None:
-    bot.States.AddHeader("Exit to HOM")
+    bot.States.AddHeader("Travel to Central Transfer Chamber")
 
-    # Ensure we're in CTC for quest preparation
+    # Ensure we're in the right area for quest preparation
     def _exit_to_central_transfer_chamber(bot: Botting):
         current_map = Map.GetMapID()
         should_goto_to_central_transfer_chamber = current_map != BotSettings.CENTRAL_TRANSFER_CHAMBER_ID
@@ -202,11 +187,11 @@ def TravelToCentralTransferChamber(bot: Botting) -> None:
 
         if should_goto_to_central_transfer_chamber:
             if BotSettings.DEBUG:   
-                print(f"[DEBUG] Not in HOM, need to go there. Currently in map {current_map}")
+                print(f"[DEBUG] Not in Central Transfer Chamber, need to go there. Currently in map {current_map}")
 
             if should_travel_to_eye_of_the_north:
                 if BotSettings.DEBUG:   
-                    print(f"[DEBUG] Not in EOTN, traveling there first")
+                    print(f"[DEBUG] Not in Eye of the North, traveling there first")
                 Map.Travel(BotSettings.EYE_OF_THE_NORTH_OUTPOST_ID)
                 yield from Routines.Yield.wait(1000)
                 yield from Routines.Yield.Map.WaitforMapLoad(BotSettings.EYE_OF_THE_NORTH_OUTPOST_ID)
@@ -214,14 +199,16 @@ def TravelToCentralTransferChamber(bot: Botting) -> None:
             if BotSettings.DEBUG:   
                 print(f"[DEBUG] Moving to portal coordinates and exiting to HOM")
 
-            # Use coroutine version to move to portal and exit
-            yield from bot.Move._coro_xy_and_exit_map(-4873.00, 5284.00, target_map_id=BotSettings.CENTRAL_TRANSFER_CHAMBER_ID)
+            # Travel
+            Map.Travel(BotSettings.CENTRAL_TRANSFER_CHAMBER_ID)
+            yield from Routines.Yield.wait(1000)
+            yield from Routines.Yield.Map.WaitforMapLoad(BotSettings.CENTRAL_TRANSFER_CHAMBER_ID)
         else:
             if BotSettings.DEBUG:   
-                print(f"[DEBUG] Already in HOM, skipping travel")
+                print(f"[DEBUG] Already in Central Transfer Chamber, skipping travel")
         yield
 
-    bot.States.AddCustomState(lambda: _exit_to_central_transfer_chamber(bot), "ExitToHOM")
+    bot.States.AddCustomState(lambda: _exit_to_central_transfer_chamber(bot), "ExitToCentralTransferChamber")
 
 def deposit_gold(bot: Botting):
     gold_on_char = GLOBAL_CACHE.Inventory.GetGoldOnCharacter()
@@ -260,12 +247,19 @@ def BuyMaterials(bot: Botting):
 
 def EnterQuest(bot: Botting) -> None:
     bot.States.AddHeader("Enter Quest")
-    bot.Move.XYAndDialog(2428.16, 3534.33, 0x44) #enter quest with pool
+
+    bot.Move.XYAndDialog(2428.16, 3534.33, BotSettings.GLINTS_CHALLENGE_DIALOG_ID)
     bot.Wait.ForMapLoad(target_map_id=BotSettings.GLINTS_CHALLENGE_MAP_ID)
+
+    # def _enter_quest(bot: Botting):
+    #     yield from Routines.Yield.wait(2000)
+    #     yield from Routines.Yield.Map.WaitforMapLoad(BotSettings.GLINTS_CHALLENGE_MAP_ID)
+
+    # bot.States.AddCustomState(lambda: _enter_quest(bot), "EnterQuest")
     
-def RunQuest(bot: Botting) -> None:    
+def FarmDestroyerCores(bot: Botting) -> None:
     bot.States.AddHeader("Run Quest")
-    _EnableCombat(bot)
+    
     bot.Move.XY(-3327.01, 741.03, step_name="Moving To Pull Spot")
     bot.Wait.ForTime(2000)
 
@@ -285,20 +279,22 @@ def RunQuest(bot: Botting) -> None:
 
     print(f"Getting Energy Back")
     # Use Skill 'Storm Chaster'
+    bot.SkillBar.UseSkillSlot(6)
 
     print(f"Jumping To Pack")
     # Use Skill 'Death's Charge'
     # Use Skill 'Whirling Defense'
+    bot.SkillBar.UseSkillSlot(7)
 
     # Pick Up Destroyer Cores, Golds, etc
     _DisableCombat(bot)
     # Resign
 
     #bot.Wait.UntilOutOfCombat()
-    bot.Properties.Disable("pause_on_danger")
-    path = [(8859.57, -7388.68), (9012.46, -9027.44)]
-    bot.Move.FollowAutoPath(path, step_name="To corner")
-    bot.Properties.Enable("pause_on_danger")
+    # bot.Properties.Disable("pause_on_danger")
+    # path = [(8859.57, -7388.68), (9012.46, -9027.44)]
+    # bot.Move.FollowAutoPath(path, step_name="To corner")
+    # bot.Properties.Enable("pause_on_danger")
     #bot.Wait.UntilOutOfCombat()
 
     bot.Wait.ForMapLoad(target_map_id=BotSettings.CENTRAL_TRANSFER_CHAMBER_ID)

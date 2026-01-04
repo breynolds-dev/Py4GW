@@ -28,8 +28,8 @@ def vector_angle(a: Tuple[float, float], b: Tuple[float, float]) -> float:
     dot = a[0]*b[0] + a[1]*b[1]
     return dot / (mag_a * mag_b)
 
-#region SFAssassinBarbarous
-class SF_Assassin_Hells_Precipice(BuildMgr):
+#region SFRangerDestroyerCore
+class ShadowFormRangerDestroyerCore(BuildMgr):
     def __init__(self, build_danger_helper: BuildDangerHelper = BuildDangerHelper()):
         super().__init__(
             name="SF Whirling Defense Ranger",
@@ -100,45 +100,7 @@ class SF_Assassin_Hells_Precipice(BuildMgr):
         if (is_sod_ready and (is_sod_about_to_expire or not has_sod)):
             # ** Cast Shroud of Distress **
             yield from self._CastSkillID(self.shroud_of_distress, log =False, aftercast_delay=1350)
-
-
-    # Taken from YAVB HoS logic, casts an optimal Heart of Shadow target
-    def CastHeartOfShadow(self):
-        center_point1 = (10980, -21532)
-        center_point2 = (11461, -17282)
-        player_pos = GLOBAL_CACHE.Player.GetXY()
-        
-        distance_to_center1 = Utils.Distance(player_pos, center_point1)
-        distance_to_center2 = Utils.Distance(player_pos, center_point2)
-        goal = center_point1 if distance_to_center1 < distance_to_center2 else center_point2
-
-        #Compute direction to goal
-        to_goal = (goal[0] - player_pos[0], goal[1] - player_pos[1])
-        
-        best_enemy = 0
-        most_opposite_score = 1 
-        
-        enemy_array = Routines.Agents.GetFilteredEnemyArray(player_pos[0], player_pos[1], Range.Spellcast.value)
-        
-        # Find enemy most opposite to goal direction
-        for enemy in enemy_array:
-            if Agent.IsDead(enemy):
-                continue
-            enemy_pos = Agent.GetXY(enemy)
-            to_enemy = (enemy_pos[0] - player_pos[0], enemy_pos[1] - player_pos[1])
-            angle_score = vector_angle(to_goal, to_enemy)  # -1 is most opposite
-            if angle_score < most_opposite_score:
-                most_opposite_score = angle_score
-                best_enemy = enemy
-        if best_enemy:
-            yield from Routines.Yield.Agents.ChangeTarget(best_enemy)    
-        else:
-            yield from Routines.Yield.Agents.TargetNearestEnemy(Range.Earshot.value)
-        
-
-        yield from self._CastSkillID(self.heart_of_shadow, log=False, aftercast_delay=350)
     
-
     def ShadowFormWatcher(self):
         # Initial vars
         player_agent_id = GLOBAL_CACHE.Player.GetAgentID()
@@ -148,76 +110,37 @@ class SF_Assassin_Hells_Precipice(BuildMgr):
 
         # Cast Shadow Form if not active or about to expire
         if (not has_shadow_form or is_sf_about_to_expire) and is_sf_ready:
-            yield from self._CastSkillID(self.glyph_of_swiftness, log=False, aftercast_delay=200)
+            yield from self._CastSkillID(self.deadly_paradox, log=False, aftercast_delay=200)
             yield from self._CastSkillID(self.shadow_form, log=False, aftercast_delay=1250)
 
     def StanceWatcher(self):
         # Initial vars
         player_agent_id = GLOBAL_CACHE.Player.GetAgentID()
         is_sf_about_to_expire = Routines.Checks.Effects.HasBuff(player_agent_id, self.shadow_form) and GLOBAL_CACHE.Effects.GetEffectTimeRemaining(player_agent_id, self.shadow_form) <= 4000
-        has_stability = Routines.Checks.Effects.HasBuff(player_agent_id, self.dwarven_stability)
-        has_stance = Routines.Checks.Effects.HasBuff(player_agent_id, self.dash)
+        has_storm_chaser = Routines.Checks.Effects.HasBuff(player_agent_id, self.storm_chaser)
+        has_stance = Routines.Checks.Effects.HasBuff(player_agent_id, self.whirling_defense)
 
         # Dont handle stance if shadow form is about to expire -- SF has priority
         if is_sf_about_to_expire:
             yield
 
         # With high enough dwarven skill, this will only run at the start of the run
-        if not has_stability and not has_stance:
-            yield from self._CastSkillID(self.dwarven_stability, log=False, aftercast_delay=1250)
-            yield from self._CastSkillID(self.dash, log=False, aftercast_delay=200)
+        if not has_storm_chaser and not has_stance:
+            yield from self._CastSkillID(self.storm_chaser, log=False, aftercast_delay=1250)
+            yield from self._CastSkillID(self.whirling_defense, log=False, aftercast_delay=200)
 
         # Continuation vars
-        remaining_stability_duration = GLOBAL_CACHE.Effects.GetEffectTimeRemaining(player_agent_id, self.dwarven_stability)
-        remaining_stance_duration = GLOBAL_CACHE.Effects.GetEffectTimeRemaining(player_agent_id, self.dash)
+        remaining_stability_duration = GLOBAL_CACHE.Effects.GetEffectTimeRemaining(player_agent_id, self.storm_chaser)
+        remaining_stance_duration = GLOBAL_CACHE.Effects.GetEffectTimeRemaining(player_agent_id, self.whirling_defense)
 
         # Refresh dwarven stability if it's about to expire
-        if (not has_stability or remaining_stability_duration <= 2000) and Routines.Checks.Skills.IsSkillIDReady(self.dwarven_stability): 
-            yield from self._CastSkillID(self.dwarven_stability, log=False, aftercast_delay=200)
+        if (not has_storm_chaser or remaining_stability_duration <= 2000) and Routines.Checks.Skills.IsSkillIDReady(self.storm_chaser): 
+            yield from self._CastSkillID(self.storm_chaser, log=False, aftercast_delay=200)
 
         # Refresh stance if it's about to expire
         if (not has_stance or remaining_stance_duration <= 2000) and self.timer.IsExpired():
             self.timer.Reset()
-            yield from self._CastSkillID(self.dash, log=False, aftercast_delay=200)
-
-
-    # def IAUWatcher(self):
-    #     player_agent_id = GLOBAL_CACHE.Player.GetAgentID()
-    #     (px, py) = GLOBAL_CACHE.Player.GetXY()
-
-    #     if Agent.IsCrippled(player_agent_id) or self.build_danger_helper.check_cripple_kd(px, py):
-    #         has_iau = Routines.Checks.Effects.HasBuff(player_agent_id, self.i_am_unstoppable)
-    #         is_iau_ready = Routines.Checks.Skills.IsSkillIDReady(self.i_am_unstoppable)
-
-    #         if is_iau_ready and not has_iau:
-    #             yield from Routines.Yield.Skills.CastSkillID(self.i_am_unstoppable, aftercast_delay=200)
-
-
-    def DefensiveWatcher(self):
-        player_agent_id = GLOBAL_CACHE.Player.GetAgentID()
-        is_ss_ready = Routines.Checks.Skills.IsSkillIDReady(self.shadow_sanctuary)
-        is_hos_ready = Routines.Checks.Skills.IsSkillIDReady(self.heart_of_shadow)
-        is_low_health = Agent.GetHealth(player_agent_id) <= 0.45
-        is_emergency_health = Agent.GetHealth(player_agent_id) <= 0.2
-
-        # Some checks to ensure Shadow Sanctuary is used optimally
-        if is_ss_ready and is_low_health:
-            yield from self._CastSkillID(self.shadow_sanctuary, log=False, aftercast_delay=500)
-
-        if is_emergency_health and is_hos_ready:
-            yield from self.CastHeartOfShadow()
-
-
-    def BlockedEscapeWatcher(self):
-        is_stuck = self.build_danger_helper.body_block_detection(seconds=4)
-        is_hos_ready = Routines.Checks.Skills.IsSkillIDReady(self.heart_of_shadow)
-        is_ds_ready = Routines.Checks.Skills.IsSkillIDReady(self.deaths_charge)
-
-        if is_stuck and is_hos_ready:
-            yield from self.CastHeartOfShadow()
-
-        elif is_stuck and is_ds_ready:
-            yield from self.DeathsChargeToBestEnemy()
+            yield from self._CastSkillID(self.whirling_defense, log=False, aftercast_delay=200)
 
     def ProcessSkillCasting(self):
         current_map_id = Map.GetMapID()
@@ -265,10 +188,10 @@ class SF_Assassin_Hells_Precipice(BuildMgr):
             # yield from self.IAUWatcher()
 
             # Shadow Sanctuary watcher
-            yield from self.DefensiveWatcher()
+            # yield from self.DefensiveWatcher()
 
             # Blocked Escape watcher
-            yield from self.BlockedEscapeWatcher()
+            # yield from self.BlockedEscapeWatcher()
 
             # === IDLE WAIT ===
             yield from Routines.Yield.wait(150)
