@@ -62,19 +62,19 @@ class ShadowFormRangerDestroyerCore(BuildMgr):
         # States
         self.is_looting = False
         self.should_use_storm_chaser = True
-        self.in_killing_routine = False
+        self.should_use_shadow_form = False
         self.routine_finished = False
 
         self.build_danger_helper = build_danger_helper
     
-    def SetKillingRoutine(self, new_value: bool):
-        print(f"[DEBUG] Setting in_killing_routine to {new_value}")
-        self.in_killing_routine = new_value
-        
-
     def SetShouldUseStormChaser(self, new_value: bool):
         print(f"[DEBUG] Setting should_use_storm_chaser to {new_value}")
         self.should_use_storm_chaser = new_value
+        
+
+    def SetShouldUseShadowForm(self, new_value: bool):
+        print(f"[DEBUG] Setting should_use_shadow_form to {new_value}")
+        self.should_use_shadow_form = new_value
 
 
     def SetRoutineFinished(self, new_value: bool):
@@ -100,11 +100,6 @@ class ShadowFormRangerDestroyerCore(BuildMgr):
     def ShroudOfDistressWatcher(self):
         """
         Watches the player's Shroud of Distress buff and casts it if necessary
-        
-        Conditions:
-        - Shroud of Distress is not active or about to expire
-        - Player has enough energy (>= 10)
-        - Shadow Form is not about to expire (Shadow Form has priority)
         """
         player_agent_id = GLOBAL_CACHE.Player.GetAgentID()
         has_sod = Routines.Checks.Effects.HasBuff(player_agent_id, self.shroud_of_distress)
@@ -123,30 +118,64 @@ class ShadowFormRangerDestroyerCore(BuildMgr):
     def ShadowFormWatcher(self):
         """
         Watches the player's Shadow Form buff and casts it if necessary
+        """
+        player_agent_id = GLOBAL_CACHE.Player.GetAgentID()
+        # has_shadow_form = Routines.Checks.Effects.HasBuff(player_agent_id, self.shadow_form)
+        # is_sf_about_to_expire = has_shadow_form and GLOBAL_CACHE.Effects.GetEffectTimeRemaining(player_agent_id, self.shadow_form) <= 4000
+        # is_sf_ready = Routines.Checks.Skills.IsSkillIDReady(self.shadow_form)
         
-        Conditions:
-        - Shadow Form is not active or about to expire
-        - Player has enough energy (>= 25) to cast Deadly Paradox + Shadow Form
+        has_deadly_paradox = Routines.Checks.Effects.HasBuff(player_agent_id, self.deadly_paradox)
+        if (yield from Routines.Yield.Skills.IsSkillIDUsable(self.shadow_form)) and self.should_use_shadow_form:
+            if (yield from self._CastSkillID(
+                    self.storm_chaser,
+                    extra_condition=(not has_deadly_paradox),
+                    log=False,
+                    aftercast_delay=500
+                )):
+                ConsoleLog(self.build_name, "Casting Storm Chaser for Energy.", Py4GW.Console.MessageType.Info, log=False)
+            if (yield from self._CastSkillID(
+                    self.deadly_paradox,
+                    extra_condition=(not has_deadly_paradox),
+                    log=False,
+                    aftercast_delay=100
+                )):
+                ConsoleLog(self.build_name, "Casting Deadly Paradox.", Py4GW.Console.MessageType.Info, log=False)
+            if (yield from self._CastSkillID(
+                    self.shadow_form,
+                    extra_condition=(has_deadly_paradox),
+                    log=False,
+                    aftercast_delay=1750
+                )):
+                ConsoleLog(self.build_name, "Casting Shadow Form.", Py4GW.Console.MessageType.Info, log=False)
+
+        # Cast Shadow Form if not active or about to expire
+        # if (not has_shadow_form or is_sf_about_to_expire) and is_sf_ready and self.should_use_shadow_form:
+        #     yield from self._CastSkillID(self.deadly_paradox, log=True, aftercast_delay=200)
+        #     yield from self._CastSkillID(self.shadow_form, log=True, aftercast_delay=1250)
+            
+
+    def WayOfPerfectionWatcher(self):
+        """
+        Watches the player's Way of Perfection buff and casts it if necessary
         """
         player_agent_id = GLOBAL_CACHE.Player.GetAgentID()
         has_shadow_form = Routines.Checks.Effects.HasBuff(player_agent_id, self.shadow_form)
-        is_sf_about_to_expire = has_shadow_form and GLOBAL_CACHE.Effects.GetEffectTimeRemaining(player_agent_id, self.shadow_form) <= 4000
-        is_sf_ready = Routines.Checks.Skills.IsSkillIDReady(self.shadow_form)
+        has_way_of_perfection = Routines.Checks.Effects.HasBuff(player_agent_id, self.way_of_perfection)
+        is_way_of_perfection_about_to_expire = has_way_of_perfection and GLOBAL_CACHE.Effects.GetEffectTimeRemaining(player_agent_id, self.way_of_perfection) <= 4000
+        is_way_of_perfection_ready = Routines.Checks.Skills.IsSkillIDReady(self.way_of_perfection)
+        is_sf_about_to_expire = Routines.Checks.Effects.HasBuff(player_agent_id, self.shadow_form) and GLOBAL_CACHE.Effects.GetEffectTimeRemaining(player_agent_id, self.shadow_form) <= 4000
 
-        # Cast Shadow Form if not active or about to expire
-        if (not has_shadow_form or is_sf_about_to_expire) and is_sf_ready:
-            yield from self._CastSkillID(self.deadly_paradox, log=True, aftercast_delay=200)
-            yield from self._CastSkillID(self.shadow_form, log=True, aftercast_delay=1250)
+        if is_sf_about_to_expire:
+            yield  # Shadow Form has priority
+
+        # Cast Way of Perfection if not active or about to expire
+        if (has_shadow_form or is_way_of_perfection_about_to_expire) and is_way_of_perfection_ready and self.should_use_shadow_form:
+            yield from self._CastSkillID(self.way_of_perfection, log=True, aftercast_delay=1250)
 
 
     def GreatDwarfArmorWatcher(self):
         """
         Watches the player's Great Dwarf Armor buff and casts it if necessary
-        
-        Conditions:
-        - Great Dwarf Armor is not active or about to expire
-        - Player has enough energy (>= 5)
-        - Shadow Form is not about to expire (Shadow Form has priority)
         """
         player_agent_id = GLOBAL_CACHE.Player.GetAgentID()
         has_gda = Routines.Checks.Effects.HasBuff(player_agent_id, self.great_dwarf_armor)
@@ -166,38 +195,25 @@ class ShadowFormRangerDestroyerCore(BuildMgr):
         """
         Watches the player's Storm Chaser buff and casts it if necessary, also
         manages the player's Whirling Defense buff during killing cycle
-        
-        Conditions:
-        - Storm Chaser is not active or about to expire
-        - Player has enough energy (>= 10)
-        - Shadow Form is not about to expire (Shadow Form has priority)
         """
         player_agent_id = GLOBAL_CACHE.Player.GetAgentID()
         is_sf_about_to_expire = Routines.Checks.Effects.HasBuff(player_agent_id, self.shadow_form) and GLOBAL_CACHE.Effects.GetEffectTimeRemaining(player_agent_id, self.shadow_form) <= 4000
         has_storm_chaser = Routines.Checks.Effects.HasBuff(player_agent_id, self.storm_chaser)
         has_whirling_defense = Routines.Checks.Effects.HasBuff(player_agent_id, self.whirling_defense)
-        # player_current_energy = Agent.GetEnergy(player_agent_id)
-        
-        if not self.should_use_storm_chaser:
-            yield
+        player_current_energy = Agent.GetEnergy(player_agent_id)
 
         if is_sf_about_to_expire:
             yield
         
-        if self.in_killing_routine:
-            yield
-        
         if has_whirling_defense:
             yield
+            
+        if player_current_energy > 25:
+            yield
 
-        remaining_storm_chaser_duration = GLOBAL_CACHE.Effects.GetEffectTimeRemaining(player_agent_id, self.storm_chaser)
-
-        if not has_storm_chaser:
+        if not has_storm_chaser and self.should_use_storm_chaser:
             yield from self._CastSkillID(self.storm_chaser, log=False, aftercast_delay=1250)
         
-        # Refresh storm chaser if it's about to expire
-        if (not has_storm_chaser or remaining_storm_chaser_duration <= 2000) and Routines.Checks.Skills.IsSkillIDReady(self.storm_chaser): 
-            yield from self._CastSkillID(self.storm_chaser, log=False, aftercast_delay=200)
 
     def ProcessSkillCasting(self):
         current_map_id = Map.GetMapID()
@@ -232,14 +248,17 @@ class ShadowFormRangerDestroyerCore(BuildMgr):
 
             # === Skill Watchers ===
 
-            # Shroud of Distress watcher
-            yield from self.ShroudOfDistressWatcher()
-
             # Shadow Form watcher
             yield from self.ShadowFormWatcher()
 
             # Stance watcher
-            yield from self.StanceWatcher()
+            # yield from self.StanceWatcher()
+            
+            # Way of Perfection watcher
+            yield from self.WayOfPerfectionWatcher()
+
+            # Shroud of Distress watcher
+            yield from self.ShroudOfDistressWatcher()
 
             # Great Dwarf Armor watcher
             yield from self.GreatDwarfArmorWatcher()
@@ -322,13 +341,15 @@ class ShadowFormRangerDestroyerCore(BuildMgr):
             overlay.EndDraw()
             
         ConsoleLog(self.build_name, "Deaths Charge Handler ::: Start Killing Routine", Py4GW.Console.MessageType.Debug)
-        self.in_killing_routine = True
+        self.SetShouldUseStormChaser(False)
         yield from self._CastSkillID(self.storm_chaser, log=False, aftercast_delay=1250)
-        yield from Routines.Yield.wait(1250)
+        Routines.Yield.wait(3000)
+        
+        yield from self._CastSkillID(self.way_of_perfection, log=False, aftercast_delay=1250)
+        Routines.Yield.wait(500)
         
         yield from Routines.Yield.Agents.ChangeTarget(best_target)
-        yield from self._CastSkillID(self.way_of_perfection, log=False, aftercast_delay=1250)
-        yield from Routines.Yield.wait(500)
         yield from self._CastSkillID(self.deaths_charge, aftercast_delay=1000)
-        yield from Routines.Yield.wait(500)
+        Routines.Yield.wait(500)
+        
         yield from self._CastSkillID(self.whirling_defense, log=False, aftercast_delay=1250)

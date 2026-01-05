@@ -18,7 +18,7 @@
 #   Challenge" quest in Guild Wars.
 # ──────────────────────────────────────────────────────────────────────────────
 import PyImGui
-from typing import Literal, Tuple
+from typing import List, Literal, Tuple
 
 from Py4GWCoreLib.Builds import ShadowFormRangerDestroyerCore
 from Py4GWCoreLib import ActionQueueManager
@@ -121,22 +121,25 @@ def _DisableCombat(bot: Botting) -> None:
 
 
 def _CheckOnMapLoadingOrDeath():
-            if Map.IsMapLoading():
-                return True
-            
-            if Agent.IsDead(GLOBAL_CACHE.Player.GetAgentID()):
-                return True
-            
-            return False
+    if Map.IsMapLoading():
+        return True
+    
+    if Agent.IsDead(GLOBAL_CACHE.Player.GetAgentID()):
+        return True
+    
+    return False
 
 
-def _ToggleStormChaser(bot: Botting) -> None:
+def _ToggleStormChaser(bot: Botting, new_value: bool) -> None:
     build = bot.config.build_handler
     if isinstance(build, ShadowFormRangerDestroyerCore):
-        build.should_use_storm_chaser = True
-        # Ensure Storm Chaser has ended
-        bot.Wait.ForTime(10000)
-        build.should_use_storm_chaser = False
+        build.SetShouldUseStormChaser(new_value)
+
+
+def _ToggleShadowForm(bot: Botting, new_value: bool) -> None:
+    build = bot.config.build_handler
+    if isinstance(build, ShadowFormRangerDestroyerCore):
+        build.SetShouldUseShadowForm(new_value)
 
 
 def InitializeBot(bot: Botting) -> None:
@@ -268,80 +271,85 @@ def EnterQuest(bot: Botting) -> None:
 
 
 def MoveIntoStartingPosition(bot: Botting) -> None:
-    _EnableCombat(bot)
     bot.States.AddHeader("Move Into Start Position")
     bot.Move.XY(-3327.01, 741.03, step_name="Moving To Pull Spot")
 
 
 def WaitForDestroyers(bot: Botting) -> None:
-    bot.States.AddHeader("Begin Farming Routine")
-    
-    # Wait for destroyers to come into range
-    bot.Wait.ForTime(80000)
-    
-    # Activate Build
     _EnableCombat(bot)
-    
-    # Wait for destroyers to stop spawning
-    bot.Wait.ForTime(135000)
-    
-    build = bot.config.build_handler
-    if isinstance(build, ShadowFormRangerDestroyerCore):
-        # build.SetShouldUseStormChaser(False)
-        build.should_use_storm_chaser = False
-        # Ensure Storm Chaser has ended
-        bot.Wait.ForTime(10000)
 
+    def _wait_for_destroyers(bot: Botting):
+        # bot.Wait.ForTime(75000)
+        yield from Routines.Yield.wait(75000)
+        _ToggleShadowForm(bot, True)
+        _ToggleStormChaser(bot, True)
+        
+        # bot.Wait.ForTime(145000)
+        yield from Routines.Yield.wait(145000)
+        _ToggleStormChaser(bot, False)
+        # bot.Wait.ForTime(10000)
+        yield from Routines.Yield.wait(10000)
+        
+    bot.States.AddCustomState(lambda: _wait_for_destroyers(bot), "Wait for Destroyers")
+    
 
 def MoveUpRamp(bot: Botting) -> None:
-    path_points_to_ramp = [
-        (-2676.40, 1735.90),
+    path_points_to_ramp:List[Tuple[float, float]] = [
+        (-2740, 1677),
+        (-2380, 1795),
+        (-2309, 2195),
     ]
     
     def _move_to_ramp(bot: Botting):
-        bot.Wait.ForTime(10000)
+        yield from Routines.Yield.wait(3000)
         yield from Routines.Yield.Movement.FollowPath(
             path_points_to_ramp,
             custom_exit_condition=lambda: _CheckOnMapLoadingOrDeath(),
             tolerance=150,
             timeout=60000,  # 1 minute timeout
         )
-        _ToggleStormChaser(bot)
 
     bot.States.AddCustomState(lambda: _move_to_ramp(bot), "Move To Ramp")
 
+
 def MoveToCliff(bot: Botting) -> None:
-    path_points_to_cliff = [
+    path_points_to_cliff:List[Tuple[float, float]] = [
+        (-2380, 2477),
+        (-2380, 2759),
+        (-2309, 3135),
         (-2232.54, 3384.54)
     ]
     
     def _move_to_cliff(bot: Botting):
-        bot.Wait.ForTime(10000)
+        yield from Routines.Yield.wait(3000)
         yield from Routines.Yield.Movement.FollowPath(
             path_points_to_cliff,
             custom_exit_condition=lambda: _CheckOnMapLoadingOrDeath(),
             tolerance=150,
             timeout=60000,  # 1 minute timeout
         )
-        _ToggleStormChaser(bot)
 
     bot.States.AddCustomState(lambda: _move_to_cliff(bot), "Move To Cliff")
 
 
 def MoveToBridge(bot: Botting) -> None:
-    path_points_to_bridge = [
+    path_points_to_bridge:List[Tuple[float, float]] = [
+        (-2333, 2406),
+        (-2098, 1960),
+        (-2074, 1701),
+        (-1957, 1184),
+        (-2074, 714),
         (-2253.28, 830.86),
     ]
     
     def _move_to_bridge(bot: Botting):
-        bot.Wait.ForTime(2000)
+        yield from Routines.Yield.wait(3000)
         yield from Routines.Yield.Movement.FollowPath(
             path_points_to_bridge,
             custom_exit_condition=lambda: _CheckOnMapLoadingOrDeath(),
             tolerance=150,
             timeout=60000,  # 1 minute timeout
         )
-        _ToggleStormChaser(bot)
 
     bot.States.AddCustomState(lambda: _move_to_bridge(bot), "Move To Bridge")
 
