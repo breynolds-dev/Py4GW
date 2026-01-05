@@ -20,7 +20,7 @@
 import PyImGui
 from typing import Literal, Tuple
 
-from Py4GWCoreLib.Builds import KeiranThackerayEOTN
+from Py4GWCoreLib.Builds import ShadowFormRangerDestroyerCore
 from Py4GWCoreLib import (GLOBAL_CACHE, Routines, Range, Py4GW, ConsoleLog, ModelID, Botting,
                           Map, ImGui, ActionQueueManager, FrameInfo)
 
@@ -56,7 +56,7 @@ class BotSettings:
 
 bot = Botting(
   "Destroyer Cores",
-  custom_build = KeiranThackerayEOTN()
+  custom_build = ShadowFormRangerDestroyerCore()
 )
 
 
@@ -67,6 +67,7 @@ def create_bot_routine(bot: Botting) -> None:
 
 def QuestLoopEntry(bot: Botting) -> None:
     """Main quest loop entry point: checks gold, deposits if needed, then runs quest"""
+    # TestBuild(bot)                 # Set the build and template
     CheckAndDepositGold(bot)         # Check gold and deposit if threshold exceeded
     GoToCentralTransferChamber(bot)  # Exit to HOM (skiped if already in HOM)
     EnterQuest(bot)                  # Enter the quest
@@ -92,9 +93,12 @@ def on_death(bot: "Botting"):
     fsm = bot.config.FSM
     fsm.pause()
     fsm.AddManagedCoroutine("OnDeath", _on_death(bot))
+    bot.OverrideBuild(ShadowFormRangerDestroyerCore())
+    bot.Templates.Aggressive(enable_imp=False)
 
-    # Travel
-    bot.OverrideBuild(KeiranThackerayEOTN())
+
+def _EnableCombat(bot: Botting) -> None:
+    bot.Properties.Enable("auto_combat")
     bot.Templates.Aggressive(enable_imp=False)
  
 
@@ -105,8 +109,9 @@ def _DisableCombat(bot: Botting) -> None:
 def InitializeBot(bot: Botting) -> None:
     bot.States.AddHeader("Initialize Bot")
 
-    condition = lambda: on_death(bot)
-    bot.Events.OnDeathCallback(condition)
+    # TODO: Figure out why this just causes instant failure on mission load
+    # condition = lambda: on_death(bot)
+    # bot.Events.OnDeathCallback(condition)
     bot.Party.LeaveParty()
 
 
@@ -197,6 +202,13 @@ def TravelToCentralTransferChamber(bot: Botting) -> None:
     bot.States.AddCustomState(lambda: _exit_to_central_transfer_chamber(bot), "ExitToCentralTransferChamber")
 
 
+def TestBuild(bot: Botting) -> None:
+    bot.States.AddHeader("Test Build")
+    bot.Properties.Enable("auto_combat")
+    bot.Templates.Aggressive(enable_imp=False)
+    bot.Wait.ForTime(10000000)
+
+
 def BuyMaterials(bot: Botting):
     """Buy Glob of Ectoplasm if gold conditions are met."""
     gold_in_inventory = GLOBAL_CACHE.Inventory.GetGoldOnCharacter()
@@ -226,13 +238,20 @@ def EnterQuest(bot: Botting) -> None:
 
 def FarmDestroyerCores(bot: Botting) -> None:
     bot.States.AddHeader("Run Quest")
+
+    global in_killing_routine
+    in_killing_routine = True
+    build = bot.config.build_handler
+    if isinstance(build, ShadowFormRangerDestroyerCore):
+        build.SetKillingRoutine(in_killing_routine)
     
     bot.Move.XY(-3327.01, 741.03, step_name="Moving To Pull Spot")
-    bot.Wait.ForTime(2000)
+    bot.Wait.ForTime(30000)
 
+    _EnableCombat(bot)
+
+    bot.Wait.ForTime(195000)
     # Total Wait Time 225000 ms
-
-    # Start Tank Routine with Shadow Form
 
     print(f"Start Balling Enemies")
     bot.Move.XY(-2676.40, 1735.90)

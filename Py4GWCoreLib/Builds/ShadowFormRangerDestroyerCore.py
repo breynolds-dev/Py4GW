@@ -64,16 +64,19 @@ class ShadowFormRangerDestroyerCore(BuildMgr):
         
         # States
         self.is_looting = False
+        self.in_killing_routine = False
         self.routine_finished = False
 
         self.build_danger_helper = build_danger_helper
+    
+    def SetKillingRoutine(self, in_killing_routine: bool):
+        self.in_killing_routine = in_killing_routine
 
     def SetRoutineFinished(self, routine_finished: bool):
         self.routine_finished = routine_finished
 
     def SetLootingSignal(self, is_looting: bool):
         self.is_looting = is_looting
-
 
     def _CastSkillID(self, skill_id:int, extra_condition:bool=True, log:bool=True, aftercast_delay:int=1000):
         result = yield from Routines.Yield.Skills.CastSkillID(skill_id, extra_condition=extra_condition, log=log, aftercast_delay=aftercast_delay)
@@ -113,34 +116,49 @@ class ShadowFormRangerDestroyerCore(BuildMgr):
             yield from self._CastSkillID(self.deadly_paradox, log=False, aftercast_delay=200)
             yield from self._CastSkillID(self.shadow_form, log=False, aftercast_delay=1250)
 
+    # Great Dwarf Armor watcher
+    def GreatDwarfArmorWatcher(self):
+        # Initial vars
+        player_agent_id = GLOBAL_CACHE.Player.GetAgentID()
+        has_gda = Routines.Checks.Effects.HasBuff(player_agent_id, self.great_dwarf_armor)
+        is_gda_ready = Routines.Checks.Skills.IsSkillIDReady(self.great_dwarf_armor)
+        is_gda_about_to_expire = has_gda and GLOBAL_CACHE.Effects.GetEffectTimeRemaining(player_agent_id, self.great_dwarf_armor) <= 2000
+        is_sf_about_to_expire = Routines.Checks.Effects.HasBuff(player_agent_id, self.shadow_form) and GLOBAL_CACHE.Effects.GetEffectTimeRemaining(player_agent_id, self.shadow_form) <= 4000
+
+        if is_sf_about_to_expire:
+            return  # Shadow Form has priority
+
+        if (is_gda_ready and (is_gda_about_to_expire or not has_gda)):
+            # ** Cast Great Dwarf Armor **
+            yield from self._CastSkillID(self.great_dwarf_armor, log =False, aftercast_delay=1350)
+    
+
     def StanceWatcher(self):
         # Initial vars
         player_agent_id = GLOBAL_CACHE.Player.GetAgentID()
         is_sf_about_to_expire = Routines.Checks.Effects.HasBuff(player_agent_id, self.shadow_form) and GLOBAL_CACHE.Effects.GetEffectTimeRemaining(player_agent_id, self.shadow_form) <= 4000
         has_storm_chaser = Routines.Checks.Effects.HasBuff(player_agent_id, self.storm_chaser)
-        has_stance = Routines.Checks.Effects.HasBuff(player_agent_id, self.whirling_defense)
+        has_whirling_defense = Routines.Checks.Effects.HasBuff(player_agent_id, self.whirling_defense)
 
         # Dont handle stance if shadow form is about to expire -- SF has priority
         if is_sf_about_to_expire:
             yield
 
-        # With high enough dwarven skill, this will only run at the start of the run
-        if not has_storm_chaser and not has_stance:
-            yield from self._CastSkillID(self.storm_chaser, log=False, aftercast_delay=1250)
-            yield from self._CastSkillID(self.whirling_defense, log=False, aftercast_delay=200)
-
         # Continuation vars
-        remaining_stability_duration = GLOBAL_CACHE.Effects.GetEffectTimeRemaining(player_agent_id, self.storm_chaser)
+        remaining_storm_chaser_duration = GLOBAL_CACHE.Effects.GetEffectTimeRemaining(player_agent_id, self.storm_chaser)
         remaining_stance_duration = GLOBAL_CACHE.Effects.GetEffectTimeRemaining(player_agent_id, self.whirling_defense)
 
-        # Refresh dwarven stability if it's about to expire
-        if (not has_storm_chaser or remaining_stability_duration <= 2000) and Routines.Checks.Skills.IsSkillIDReady(self.storm_chaser): 
-            yield from self._CastSkillID(self.storm_chaser, log=False, aftercast_delay=200)
+        if not self.in_killing_routine:
+            if not has_storm_chaser:
+                yield from self._CastSkillID(self.storm_chaser, log=False, aftercast_delay=1250)
+            
+            # Refresh storm chaser if it's about to expire
+            if (not has_storm_chaser or remaining_storm_chaser_duration <= 2000) and Routines.Checks.Skills.IsSkillIDReady(self.storm_chaser): 
+                yield from self._CastSkillID(self.storm_chaser, log=False, aftercast_delay=200)
 
-        # Refresh stance if it's about to expire
-        if (not has_stance or remaining_stance_duration <= 2000) and self.timer.IsExpired():
-            self.timer.Reset()
-            yield from self._CastSkillID(self.whirling_defense, log=False, aftercast_delay=200)
+        if self.in_killing_routine:
+            if not has_whirling_defense:
+                yield from self._CastSkillID(self.whirling_defense, log=False, aftercast_delay=1250)
 
     def ProcessSkillCasting(self):
         current_map_id = Map.GetMapID()
@@ -183,6 +201,13 @@ class ShadowFormRangerDestroyerCore(BuildMgr):
 
             # Stance watcher
             yield from self.StanceWatcher()
+
+            # Great Dwarf Armor watcher
+            yield from self.GreatDwarfArmorWatcher()
+            
+            if self.in_killing_routine:
+                # Great Dwarf Armor watcher
+
 
             # IAU Watcher === Anti Cripple/KD ===
             # yield from self.IAUWatcher()
