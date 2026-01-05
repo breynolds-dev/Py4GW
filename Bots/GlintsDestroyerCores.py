@@ -21,8 +21,15 @@ import PyImGui
 from typing import Literal, Tuple
 
 from Py4GWCoreLib.Builds import ShadowFormRangerDestroyerCore
-from Py4GWCoreLib import (GLOBAL_CACHE, Routines, Range, Py4GW, ConsoleLog, ModelID, Botting,
-                          Map, ImGui, ActionQueueManager, FrameInfo)
+from Py4GWCoreLib import ActionQueueManager
+from Py4GWCoreLib import Agent
+from Py4GWCoreLib import Botting
+from Py4GWCoreLib import GLOBAL_CACHE
+from Py4GWCoreLib import ImGui
+from Py4GWCoreLib import Map
+from Py4GWCoreLib import ModelID
+from Py4GWCoreLib import Py4GW
+from Py4GWCoreLib import Routines
 
 
 class BotSettings:
@@ -67,11 +74,15 @@ def create_bot_routine(bot: Botting) -> None:
 
 def QuestLoopEntry(bot: Botting) -> None:
     """Main quest loop entry point: checks gold, deposits if needed, then runs quest"""
-    # TestBuild(bot)                 # Set the build and template
-    CheckAndDepositGold(bot)         # Check gold and deposit if threshold exceeded
-    GoToCentralTransferChamber(bot)  # Exit to HOM (skiped if already in HOM)
-    EnterQuest(bot)                  # Enter the quest
-    FarmDestroyerCores(bot)          # Run the farm then loops back to CheckAndDepositGold
+    CheckAndDepositGold(bot)          # Check gold and deposit if threshold exceeded
+    GoToCentralTransferChamber(bot)   # Exit to HOM (skiped if already in HOM)
+    EnterQuest(bot)                   # Enter the quest
+    MoveIntoStartingPosition(bot)     # Move into starting position for farming
+    WaitForDestroyers(bot)            # Wait for destroyers to come into range and stop spawning
+    MoveUpRamp(bot)                   # Move up the ramp
+    MoveToCliff(bot)                  # Ball Enemies by moving to the cliff
+    MoveToBridge(bot)                 # Further group Enemies by moving to the bridge
+    FarmDestroyerCores(bot)           # Run the farm then loops back to CheckAndDepositGold
 
 
 def _on_death(bot: "Botting"):
@@ -98,16 +109,43 @@ def on_death(bot: "Botting"):
 
 
 def _EnableCombat(bot: Botting) -> None:
-    bot.Properties.Enable("auto_combat")
-    bot.Templates.Aggressive(enable_imp=False)
+    bot.Templates.Aggressive(
+        enable_imp=False,
+        auto_loot=False,
+        pause_on_danger=False
+    )
  
 
 def _DisableCombat(bot: Botting) -> None:
     bot.Templates.Pacifist()
 
 
+def _CheckOnMapLoadingOrDeath():
+            if Map.IsMapLoading():
+                return True
+            
+            if Agent.IsDead(GLOBAL_CACHE.Player.GetAgentID()):
+                return True
+            
+            return False
+
+
+def _ToggleStormChaser(bot: Botting) -> None:
+    build = bot.config.build_handler
+    if isinstance(build, ShadowFormRangerDestroyerCore):
+        build.should_use_storm_chaser = True
+        # Ensure Storm Chaser has ended
+        bot.Wait.ForTime(10000)
+        build.should_use_storm_chaser = False
+
+
 def InitializeBot(bot: Botting) -> None:
     bot.States.AddHeader("Initialize Bot")
+    bot.Properties.Disable('hero_ai')
+    bot.Properties.Disable('auto_loot')
+    bot.Properties.Disable('auto_combat')
+    bot.Properties.Disable('pause_on_danger')
+    bot.OverrideBuild(ShadowFormRangerDestroyerCore())
 
     # TODO: Figure out why this just causes instant failure on mission load
     # condition = lambda: on_death(bot)
@@ -202,13 +240,6 @@ def TravelToCentralTransferChamber(bot: Botting) -> None:
     bot.States.AddCustomState(lambda: _exit_to_central_transfer_chamber(bot), "ExitToCentralTransferChamber")
 
 
-def TestBuild(bot: Botting) -> None:
-    bot.States.AddHeader("Test Build")
-    bot.Properties.Enable("auto_combat")
-    bot.Templates.Aggressive(enable_imp=False)
-    bot.Wait.ForTime(10000000)
-
-
 def BuyMaterials(bot: Botting):
     """Buy Glob of Ectoplasm if gold conditions are met."""
     gold_in_inventory = GLOBAL_CACHE.Inventory.GetGoldOnCharacter()
@@ -236,64 +267,111 @@ def EnterQuest(bot: Botting) -> None:
     bot.Wait.ForMapLoad(target_map_id=BotSettings.GLINTS_CHALLENGE_MAP_ID)
 
 
-def FarmDestroyerCores(bot: Botting) -> None:
-    bot.States.AddHeader("Run Quest")
+def MoveIntoStartingPosition(bot: Botting) -> None:
+    _EnableCombat(bot)
+    bot.States.AddHeader("Move Into Start Position")
+    bot.Move.XY(-3327.01, 741.03, step_name="Moving To Pull Spot")
 
-    global in_killing_routine
-    in_killing_routine = True
+
+def WaitForDestroyers(bot: Botting) -> None:
+    bot.States.AddHeader("Begin Farming Routine")
+    
+    # Wait for destroyers to come into range
+    bot.Wait.ForTime(80000)
+    
+    # Activate Build
+    _EnableCombat(bot)
+    
+    # Wait for destroyers to stop spawning
+    bot.Wait.ForTime(135000)
+    
     build = bot.config.build_handler
     if isinstance(build, ShadowFormRangerDestroyerCore):
-        build.SetKillingRoutine(in_killing_routine)
+        # build.SetShouldUseStormChaser(False)
+        build.should_use_storm_chaser = False
+        # Ensure Storm Chaser has ended
+        bot.Wait.ForTime(10000)
+
+
+def MoveUpRamp(bot: Botting) -> None:
+    path_points_to_ramp = [
+        (-2676.40, 1735.90),
+    ]
     
-    bot.Move.XY(-3327.01, 741.03, step_name="Moving To Pull Spot")
-    bot.Wait.ForTime(30000)
+    def _move_to_ramp(bot: Botting):
+        bot.Wait.ForTime(10000)
+        yield from Routines.Yield.Movement.FollowPath(
+            path_points_to_ramp,
+            custom_exit_condition=lambda: _CheckOnMapLoadingOrDeath(),
+            tolerance=150,
+            timeout=60000,  # 1 minute timeout
+        )
+        _ToggleStormChaser(bot)
 
-    _EnableCombat(bot)
+    bot.States.AddCustomState(lambda: _move_to_ramp(bot), "Move To Ramp")
 
-    bot.Wait.ForTime(195000)
-    # Total Wait Time 225000 ms
-
-    print(f"Start Balling Enemies")
-    bot.Move.XY(-2676.40, 1735.90)
-    bot.Wait.ForTime(2000)
-
-    bot.Move.XY(-2232.54, 3384.54)
-    bot.Wait.ForTime(2000)
-
-    bot.Move.XY(-2253.28, 830.86)
-    bot.Wait.ForTime(3000)
-
-    print(f"Getting Energy Back")
-    # Use Skill 'Storm Chaster'
-    bot.SkillBar.UseSkillSlot(6)
-
-    print(f"Jumping To Pack")
-    # Use Skill 'Death's Charge'
-    # Use Skill 'Whirling Defense'
-    bot.SkillBar.UseSkillSlot(7)
-
-    # Pick Up Destroyer Cores, Golds, etc
-    _DisableCombat(bot)
-    # Resign
-
-    #bot.Wait.UntilOutOfCombat()
-    # bot.Properties.Disable("pause_on_danger")
-    # path = [(8859.57, -7388.68), (9012.46, -9027.44)]
-    # bot.Move.FollowAutoPath(path, step_name="To corner")
-    # bot.Properties.Enable("pause_on_danger")
-    #bot.Wait.UntilOutOfCombat()
-
-    bot.Wait.ForMapLoad(target_map_id=BotSettings.CENTRAL_TRANSFER_CHAMBER_ID)
+def MoveToCliff(bot: Botting) -> None:
+    path_points_to_cliff = [
+        (-2232.54, 3384.54)
+    ]
     
-    # Increment success counter at runtime, not setup time
-    def _increment_success():
-        _increment_runs_counters(bot, "success")
-        yield
+    def _move_to_cliff(bot: Botting):
+        bot.Wait.ForTime(10000)
+        yield from Routines.Yield.Movement.FollowPath(
+            path_points_to_cliff,
+            custom_exit_condition=lambda: _CheckOnMapLoadingOrDeath(),
+            tolerance=150,
+            timeout=60000,  # 1 minute timeout
+        )
+        _ToggleStormChaser(bot)
+
+    bot.States.AddCustomState(lambda: _move_to_cliff(bot), "Move To Cliff")
+
+
+def MoveToBridge(bot: Botting) -> None:
+    path_points_to_bridge = [
+        (-2253.28, 830.86),
+    ]
     
-    bot.States.AddCustomState(lambda: _increment_success(), "IncrementSuccessCounter")
-    
-    # Loop back to check gold and run quest again
-    bot.States.JumpToStepName("[H]Check and Deposit Gold_2")
+    def _move_to_bridge(bot: Botting):
+        bot.Wait.ForTime(2000)
+        yield from Routines.Yield.Movement.FollowPath(
+            path_points_to_bridge,
+            custom_exit_condition=lambda: _CheckOnMapLoadingOrDeath(),
+            tolerance=150,
+            timeout=60000,  # 1 minute timeout
+        )
+        _ToggleStormChaser(bot)
+
+    bot.States.AddCustomState(lambda: _move_to_bridge(bot), "Move To Bridge")
+
+
+def FarmDestroyerCores(bot: Botting) -> None:
+    def _farm_destroyer_cores(bot: Botting):
+        build = bot.config.build_handler
+
+        if isinstance(build, ShadowFormRangerDestroyerCore):
+            build.DeathsChargeToBestEnemy()
+
+        bot.Wait.ForTime(15000)
+        # Pick Up Destroyer Cores, Golds, etc
+        _DisableCombat(bot)
+        
+        bot.Party.Resign()
+        bot.Wait.ForMapLoad(target_map_id=BotSettings.CENTRAL_TRANSFER_CHAMBER_ID)
+        
+        # Increment success counter at runtime, not setup time
+        def _increment_success():
+            _increment_runs_counters(bot, "success")
+            yield
+        
+        bot.States.AddCustomState(lambda: _increment_success(), "IncrementSuccessCounter")
+        
+        # Loop back to check gold and run quest again
+        bot.States.JumpToStepName("[H]Check and Deposit Gold_2")
+        
+    bot.States.AddCustomState(lambda: _farm_destroyer_cores(bot), "Farm Destroyer Cores")
+
 
 def _increment_runs_counters(bot: Botting, type: Literal["success", "fail"]):
     """Increment run counters based on run result"""
